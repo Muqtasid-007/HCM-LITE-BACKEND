@@ -16,13 +16,18 @@ app.disable('x-powered-by');
 app.use((req,res,next)=>{req.id=randomUUID();res.set('X-Request-Id',req.id);const start=Date.now();res.on('finish',()=>logger.info({requestId:req.id,method:req.method,path:req.path,status:res.statusCode,durationMs:Date.now()-start},'request'));next();});
 app.use(helmet());
 const allowed=env.CORS_ORIGINS.split(',').map(s=>s.trim()).filter(Boolean);
-app.use(cors({origin:(origin,cb)=>cb(origin&&!allowed.includes(origin)?new AppError(403,'Origin not allowed'):null,true),credentials:false}));
+const localOrigin=/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+app.use(cors({origin:(origin,cb)=>{
+  if(!origin || allowed.includes(origin) || (env.NODE_ENV!=='production' && localOrigin.test(origin))) return cb(null,true);
+  return cb(new AppError(403,'Origin not allowed'));
+},credentials:false}));
 app.use(express.json({limit:'1mb'}));
 app.use(rateLimit({windowMs:60000,limit:300,standardHeaders:'draft-8',legacyHeaders:false,message:{success:false,message:'Rate limit exceeded'}}));
 app.get('/health',(req,res)=>ok(res,{status:'alive'}));
 app.get('/ready',async(req,res)=>{if(mongoose.connection.readyState!==1)return res.status(503).json({success:false,message:'Database unavailable'});try{await mongoose.connection.db.admin().ping();ok(res,{status:'ready'});}catch{res.status(503).json({success:false,message:'Database unavailable'});}});
 app.get('/api/v1/openapi.json',(req,res)=>res.json(openapi()));
 app.use('/api/v1',router);
+app.use('/api',router);
 app.use((req,res)=>res.status(404).json({success:false,message:'Endpoint not found',requestId:req.id}));
 app.use((err,req,res,next)=>{
   let status=err.status||500,message=status<500?err.message:'An unexpected error occurred',errors=err.errors;

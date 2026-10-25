@@ -30,7 +30,9 @@ const add=(method,path,summary,access,schema,fn,query=false)=>{
 const all=['Admin','HR','Employee'],staff=['Admin','HR'];
 const loginLimiter=rateLimit({windowMs:15*60000,limit:10,skipSuccessfulRequests:true,standardHeaders:'draft-8',legacyHeaders:false,message:{success:false,message:'Too many authentication attempts; try again later'}});
 router.use(['/auth/login','/setup'],loginLimiter);
-add('get','/setup-status','Whether initial setup is required','public',null,async()=>({initializationRequired:!await Company.exists({_id:'singleton'})}));
+const setupStatus=async()=>{const [companyExists,adminExists]=await Promise.all([Company.exists({_id:'singleton'}),User.exists({role:'Admin'})]);const isSetupComplete=Boolean(companyExists&&adminExists);return {isSetupComplete,initializationRequired:!isSetupComplete};};
+add('get','/setup-status','Whether initial setup is required','public',null,async()=>({initializationRequired:!(await setupStatus()).isSetupComplete}));
+add('get','/setup/status','Whether initial setup is required','public',null,setupStatus);
 add('post','/setup','Create company and first Admin atomically','public',v.setup,r=>auth.setupCompany(r.validated.body));
 add('post','/auth/login','Login and obtain an 8-hour JWT','public',z.object({email:v.email,password:v.passwordInput}).strict(),r=>auth.login(r.validated.body));
 router.use(authenticate);
