@@ -1,0 +1,49 @@
+{
+  "name": "hackathon-backend",
+  "version": "1.0.0",
+  "description": "HCM Lite HR, attendance, leave, payroll and tool-calling AI API",
+  "main": "server.js",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "bootstrap": "node src/jobs/bootstrap.js",
+    "reconcile": "node src/jobs/reconcile.js",
+    "docs": "node scripts/generate-docs.js",
+    "check": "node scripts/check.js",
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "config": {
+    "mongodbMemoryServer": {
+      "version": "7.0.24"
+    }
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cloudinary": "^2.11.0",
+    "cors": "^2.8.6",
+    "csv-parse": "^7.0.3",
+    "csv-stringify": "^6.9.0",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "luxon": "^3.7.2",
+    "mongoose": "^9.11.4",
+    "nodemon": "^3.1.14",
+    "pdfkit": "^0.20.2",
+    "pino": "^10.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.3.0",
+    "supertest": "^7.3.1"
+  }
+}
