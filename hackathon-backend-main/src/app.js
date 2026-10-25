@@ -17,8 +17,9 @@ app.use((req,res,next)=>{req.id=randomUUID();res.set('X-Request-Id',req.id);cons
 app.use(helmet());
 const allowed=env.CORS_ORIGINS.split(',').map(s=>s.trim()).filter(Boolean);
 const localOrigin=/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+const vercelOrigin=/^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
 app.use(cors({origin:(origin,cb)=>{
-  if(!origin || allowed.includes(origin) || (env.NODE_ENV!=='production' && localOrigin.test(origin))) return cb(null,true);
+  if(!origin || allowed.includes(origin) || vercelOrigin.test(origin) || (env.NODE_ENV!=='production' && localOrigin.test(origin))) return cb(null,true);
   return cb(new AppError(403,'Origin not allowed'));
 },credentials:false}));
 app.use(express.json({limit:'1mb'}));

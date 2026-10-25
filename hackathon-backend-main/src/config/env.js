@@ -5,7 +5,7 @@ const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(5000),
   MONGODB_URI: z.string().min(1).regex(/^mongodb(?:\+srv)?:\/\//,'MONGODB_URI must use mongodb:// or mongodb+srv://'),
   JWT_SECRET: z.string().min(32),
-  CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:5173'),
+  CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:5173,https://vite-project-git-main-mmuqtasid007-7894s-projects.vercel.app'),
   AI_API_KEY: z.string().optional(),
   AI_BASE_URL: z.url().default('https://api.openai.com/v1'),
   AI_MODEL: z.string().default('gpt-4o-mini'),
