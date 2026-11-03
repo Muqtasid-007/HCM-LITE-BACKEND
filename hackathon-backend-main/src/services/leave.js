@@ -43,7 +43,7 @@ export async function applyLeave(actor,input) {
   });
 }
 export async function decideLeave(actor,id,input) {
-  roles(actor,'HR'); return transaction(async s=> {
+  roles(actor,'Admin','HR'); return transaction(async s=> {
     const r=await Leave.findById(id).session(s); assert(r,404,'Leave not found'); assert(r.state==='pending',409,'Already reviewed'); assert(String(r.employeeId)!==String(actor.employeeId),403,'Cannot review your own leave');
     if(input.decision==='approved') {
       const e=await scopeEmployee(actor,r.employeeId,s),c=await company(s);

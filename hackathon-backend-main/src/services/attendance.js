@@ -7,7 +7,7 @@ export function classify(checkIn,checkOut,date,policy,closed=false) {
   const start=DateTime.fromISO(`${date}T${policy.officeStart}`,{zone:policy.timezone}).plus({minutes:policy.graceMinutes});
   const late=new Date(checkIn).getTime()>start.toMillis();
   const minutes=checkOut ? Math.floor((new Date(checkOut)-new Date(checkIn))/60000):0;
-  return {late,minutes,status:!checkOut ? (closed?'missing_checkout':'open') : minutes<policy.halfDayHours*60 ? 'half_day':late?'late':'present'};
+  return {late,minutes,status:!checkOut ? (closed?'missing_checkout':late?'late':'present') : minutes<policy.halfDayHours*60 ? 'half_day':late?'late':'present'};
 }
 export async function checkIn(actor) {
   roles(actor,'Employee','HR');
