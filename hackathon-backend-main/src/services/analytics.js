@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { Employee, Attendance, Leave, Payroll, Announcement, Correction, Audit } from '../models/index.js';
+import { Employee, User, Attendance, Leave, Payroll, Announcement, Correction, Audit } from '../models/index.js';
 import { company, scopeEmployee } from './common.js';
 import { dates, policyFor, currentPolicy, working, employed, statusFor, salaryFor, today } from '../utils/dates.js';
 import { assert } from '../utils/errors.js';
@@ -9,7 +9,7 @@ export async function dashboard(actor,f={}) {
   assert(to<=now,422,'Analytics cannot include future dates');
   const q={}; if(actor.role==='Employee') q._id=actor.employeeId||null; else if(f.departmentId) q.departmentId=f.departmentId;
   const employees=await Employee.find(q).lean(),ids=employees.map(e=>e._id),match={employeeId:{$in:ids},date:{$gte:from,$lte:to}};
-  const [attendance,leave,runs,announcements,lateGroups,headcountGroups]=await Promise.all([
+  const [attendance,leave,runs,announcements,lateGroups,headcountGroups,linkedUsers]=await Promise.all([
     Attendance.find(match).lean(),Leave.find({employeeId:{$in:ids},state:'approved',start:{$lte:to},end:{$gte:from}}).lean(),
     Payroll.find({state:'finalized',month:{$gte:from.slice(0,7),$lte:to.slice(0,7)}}).lean(),
     Announcement.find().sort({createdAt:-1}).limit(10).lean(),
@@ -20,6 +20,7 @@ export async function dashboard(actor,f={}) {
       {$match:{effectiveStatus:{$in:['active','probation']}}},
       {$group:{_id:'$departmentId',headcount:{$sum:1},totalGrossMinor:{$sum:{$multiply:['$effectiveBasic',1.5]}}}},
     ]),
+    User.find({employeeId:{$in:ids}}).select('employeeId role').lean(),
   ]);
   const counts={present:0,late:0,half_day:0,missing_checkout:0,open:0,absent:0,on_leave:0,expectedDays:0,lateFlags:0,minutes:0},trend=[],byDepartment={};
   const index=new Map(attendance.map(a=>[`${a.employeeId}:${a.date}`,a])),leaveIndex=new Map();
@@ -52,7 +53,15 @@ export async function dashboard(actor,f={}) {
   const pending=actor.role==='Employee'?0:await Leave.countDocuments({employeeId:{$in:ids},state:'pending'})+await Correction.countDocuments({employeeId:{$in:ids},state:'pending'});
   const leaveByType={}; for(const l of leave) for(const d of l.days) if(d.date>=from&&d.date<=to) leaveByType[l.type]=(leaveByType[l.type]||0)+1;
   const quotaTotal=p.leaveTypes.filter(t=>t.paid&&t.active).reduce((n,t)=>n+(t.quota||0)*headcount,0);
-  const result={from,to,headcount,exits,attritionPercent:avg?exits/avg*100:0,attendance:counts,attendanceRate:denominator?(counts.present+counts.late+counts.missing_checkout+counts.open+0.5*counts.half_day)/denominator*100:0,latePercent:counts.present+counts.late?counts.late/(counts.present+counts.late)*100:0,absenteeismPercent:counts.expectedDays?counts.absent/counts.expectedDays*100:0,pendingApprovals:pending,trend,byDepartment:Object.values(byDepartment).map(d=>({...d,absenteeismPercent:d.expectedDays?d.absent/d.expectedDays*100:0})),lateComers:lateGroups.map(g=>({employeeId:g._id,name:employees.find(e=>String(e._id)===String(g._id))?.name,count:g.count})),leaveByType,leaveUtilizationPercent:quotaTotal?Object.entries(leaveByType).filter(([name])=>p.leaveTypes.some(t=>t.name===name&&t.paid)).reduce((n,[,v])=>n+v,0)/quotaTotal*100:0,payroll:{grossMinor:slips.reduce((n,s)=>n+s.grossMinor,0),netMinor:slips.reduce((n,s)=>n+s.netMinor,0),byMonth:payrollByMonth,byDepartment:payrollByDepartment},averageGrossMinor:headcount?Math.round(employees.filter(active).reduce((n,e)=>n+salaryFor(e,to)*1.5,0)/headcount):0,salaryByDesignation:Object.fromEntries(Object.entries(salaryByDesignation).map(([k,v])=>[k,{...v,averageGrossMinor:Math.round(v.totalGrossMinor/v.count)}])),gender,tenure,announcements};
+  const roleByEmployee=new Map(linkedUsers.map(u=>[String(u.employeeId),u.role]));
+  const attendanceDetails=[];
+  for(const date of range.slice(-14)) for(const e of employees) {
+    if(!employed(e,date)||!working(date,policyFor(c,date))) continue;
+    const a=index.get(`${e._id}:${date}`),l=leaveIndex.get(`${e._id}:${date}`);
+    const status=l&&!a?.checkIn?'on_leave':a?.checkIn?(a.late?'late':'present'):'absent';
+    attendanceDetails.push({date,employee:{_id:e._id,name:e.name,role:roleByEmployee.get(String(e._id))||'Employee'},status});
+  }
+  const result={from,to,headcount,exits,attritionPercent:avg?exits/avg*100:0,attendance:counts,attendanceRate:denominator?(counts.present+counts.late+counts.missing_checkout+counts.open+0.5*counts.half_day)/denominator*100:0,latePercent:counts.present+counts.late?counts.late/(counts.present+counts.late)*100:0,absenteeismPercent:counts.expectedDays?counts.absent/counts.expectedDays*100:0,pendingApprovals:pending,trend,attendanceDetails,byDepartment:Object.values(byDepartment).map(d=>({...d,absenteeismPercent:d.expectedDays?d.absent/d.expectedDays*100:0})),lateComers:lateGroups.map(g=>({employeeId:g._id,name:employees.find(e=>String(e._id)===String(g._id))?.name,count:g.count})),leaveByType,leaveUtilizationPercent:quotaTotal?Object.entries(leaveByType).filter(([name])=>p.leaveTypes.some(t=>t.name===name&&t.paid)).reduce((n,[,v])=>n+v,0)/quotaTotal*100:0,payroll:{grossMinor:slips.reduce((n,s)=>n+s.grossMinor,0),netMinor:slips.reduce((n,s)=>n+s.netMinor,0),byMonth:payrollByMonth,byDepartment:payrollByDepartment},averageGrossMinor:headcount?Math.round(employees.filter(active).reduce((n,e)=>n+salaryFor(e,to)*1.5,0)/headcount):0,salaryByDesignation:Object.fromEntries(Object.entries(salaryByDesignation).map(([k,v])=>[k,{...v,averageGrossMinor:Math.round(v.totalGrossMinor/v.count)}])),gender,tenure,announcements};
   if(actor.role==='Admin') result.auditFeed=await Audit.find().sort({createdAt:-1}).limit(10).lean();
   result.leaveUtilizationByType=p.leaveTypes.map(t=>({type:t.name,used:leaveByType[t.name]||0,quota:t.quota===null?null:t.quota*headcount,percent:t.quota&&headcount?(leaveByType[t.name]||0)/(t.quota*headcount)*100:null}));
   for(const dept of result.byDepartment) {
