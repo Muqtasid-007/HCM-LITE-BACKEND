@@ -21,7 +21,7 @@ async function insertEmployee(actor,input,session,linkedUser) {
   await audit(actor,'created','Employee',e._id,null,e.toObject(),session);
   return { employee:e,user:publicUser(user),...(password && {temporaryPassword:password}) };
 }
-export async function createEmployee(actor,input) { roles(actor,'HR'); return transaction(s=>insertEmployee(actor,input,s)); }
+export async function createEmployee(actor,input) { roles(actor,'Admin','HR'); return transaction(s=>insertEmployee(actor,input,s)); }
 export async function linkHR(actor,userId,input) {
   roles(actor,'Admin'); return transaction(async s=> { const u=await User.findById(userId).session(s); assert(u?.role==='HR',422,'HR user required'); assert(u.email===input.email,422,'Profile email must match HR login'); return insertEmployee(actor,input,s,u); });
 }
@@ -29,7 +29,7 @@ export async function editEmployee(actor,id,input) {
   return transaction(async session=> {
     const e=await scopeEmployee(actor,id,session); const before=e.toObject();
     if(actor.role==='Employee') assert(Object.keys(input).every(k=>['phone','address'].includes(k)),403,'Only phone and address are editable');
-    else roles(actor,'HR');
+    else roles(actor,'Admin','HR');
     await checkUnits(input,session);
     const c=await company(session); const now=today(currentPolicy(c).timezone);
     if(input.status || input.exitDate) {
@@ -43,7 +43,7 @@ export async function editEmployee(actor,id,input) {
   });
 }
 export async function setSalary(actor,id,input) {
-  roles(actor,'HR'); return transaction(async session=> {
+  roles(actor,'Admin','HR'); return transaction(async session=> {
     const e=await scopeEmployee(actor,id,session),c=await company(session);
     assert(input.effectiveDate>today(currentPolicy(c).timezone) && input.effectiveDate>e.salaryHistory.at(-1).effectiveDate,422,'Salary changes require a future increasing effectiveDate');
     const before=e.toObject(); e.salaryHistory.push({effectiveDate:input.effectiveDate,basicMinor:Math.round(input.basicSalary*100)}); await e.save({session});
@@ -65,7 +65,7 @@ export async function employee360(actor,id) {
   return {employee:e,attendance,leaves,payslips:runs.map(r=>({runId:r._id,month:r.month,...r.slips.find(s=>s.employeeId===String(e._id))}))};
 }
 export async function importCSV(actor,csv,dryRun) {
-  roles(actor,'HR'); let rows;
+  roles(actor,'Admin','HR'); let rows;
   try { rows=parse(csv,{columns:true,skip_empty_lines:true,bom:true,trim:true,max_record_size:10000}); } catch { throw new AppError(422,'Invalid CSV'); }
   assert(rows.length>0 && rows.length<=500,422,'CSV must contain 1 to 500 rows');
   async function validate(session) {
@@ -84,7 +84,7 @@ export async function importCSV(actor,csv,dryRun) {
   return transaction(async s=> { const r=await validate(s); if(r.errors.length) throw new AppError(422,'Import rejected; no records saved',r.errors); const items=[]; for(const row of r.valid) items.push(await insertEmployee(actor,row,s)); return {imported:items.length,items}; });
 }
 export async function exportCSV(actor,f) {
-  roles(actor,'HR'); const c=await company(),date=today(currentPolicy(c).timezone); const rows=await Employee.find(employeeQuery(actor,f,date)).sort({code:1}).lean();
+  roles(actor,'Admin','HR'); const c=await company(),date=today(currentPolicy(c).timezone); const rows=await Employee.find(employeeQuery(actor,f,date)).sort({code:1}).lean();
   for(const e of rows) e.status=statusFor(e,date);
   const safe=v=>typeof v==='string' && /^[\s]*[=+\-@\t\r]/.test(v) ? `'${v}`:v;
   return stringify(rows.map(e=>Object.fromEntries(['code','email','name','departmentId','designationId','joiningDate','exitDate','status','gender','phone','address','emergencyContact'].map(k=>[k,safe(e[k]?.toString() || '')]))),{header:true});

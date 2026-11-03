@@ -70,6 +70,7 @@ test('HCM Lite integration against isolated transactional MongoDB', {timeout:240
     const before=await User.countDocuments();assert.equal((await call('post','/employees',hr,employeeBody('E001','orphan@example.com'))).status,409);assert.equal(await User.countDocuments(),before);
     assert.equal((await call('delete',`/organization/units/${departmentId}`,admin)).status,409);
     assert.equal((await call('post',`/users/${hrId}/employee-profile`,admin,employeeBody('HR001','hr@example.com'))).status,200);
+    assert.equal((await call('post','/employees',admin,employeeBody('E001','dup@example.com'))).status,409);
   });
   await t.test('object authorization, field allowlists and scoped directory',async()=>{
     assert.equal((await call('get',`/employees/${secondId}`,employee)).status,403);
@@ -89,8 +90,9 @@ test('HCM Lite integration against isolated transactional MongoDB', {timeout:240
     const invalid=await call('post','/employees/import',hr,{csv:`${header}\n${row}\n${row}`,dryRun:false});assert.equal(invalid.status,422);assert(invalid.body.errors.some(e=>e.row===3));assert.equal(await Employee.countDocuments(),count);
     const r=await call('post','/employees/import',hr,{csv:`${header}\n${row}`,dryRun:false});assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.data.imported,1);
     const csv=await call('get','/employees/export',hr);assert.match(csv.text,/'=SUM\(1\)/);
-    assert.equal((await call('get','/employees/export',admin)).status,403);
+    const adminCsv=await call('get','/employees/export',admin);assert.equal(adminCsv.status,200);assert.equal((await call('get','/employees/export',employee)).status,403);
     const bad=await call('post','/employees/import',hr,{csv:`${header}\nE004,bad,Name,${departmentId},${designationId},2026-02-30,-1`,dryRun:true});assert(bad.body.data.errors.length>=3);
+    const rowAdmin=row.replace('E003','E005').replace('three@','five@');const adminDry=await call('post','/employees/import',admin,{csv:`${header}\n${rowAdmin}`,dryRun:true});assert.equal(adminDry.body.data.valid,true);
   });
   await t.test('check-in uniqueness, server timestamps, open status and half-day late flags',async()=>{
     const attempts=await Promise.all([call('post','/attendance/check-in',employee,{}),call('post','/attendance/check-in',employee,{})]);assert.deepEqual(attempts.map(r=>r.status).sort(),[200,409]);
