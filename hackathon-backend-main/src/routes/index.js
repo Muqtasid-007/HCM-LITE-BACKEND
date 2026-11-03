@@ -45,20 +45,15 @@ add('post','/organization/units','Create department or designation',['Admin'],z.
 add('patch','/organization/units/:id','Edit or deactivate configuration',['Admin'],z.object({name:v.text.optional(),active:z.boolean().optional()}).strict(),r=>org.saveUnit(r.actor,r.params.id,r.validated.body));
 add('delete','/organization/units/:id','Delete unreferenced configuration',['Admin'],null,r=>org.deleteUnit(r.actor,r.params.id));
 add('post','/users/hr','Create HR login with temporary credentials',['Admin'],z.object({email:v.email}).strict(),r=>auth.createHR(r.actor,r.validated.body));
+
 add('post','/users','Create user login with temporary credentials',['Admin'],z.object({email:v.email,role:z.enum(['HR','Employee'])}).strict(),r=>auth.createUser(r.actor,r.validated.body));
 add('get','/users','List logins',['Admin'],v.filters,async r=>{const f=r.validated.query;const [users,total]=await Promise.all([User.find().sort({createdAt:-1}).skip((f.page-1)*f.limit).limit(f.limit),User.countDocuments()]);return {items:users.map(auth.publicUser),total,page:f.page,limit:f.limit};},true);
 for(const action of ['reset','deactivate','activate']) add('post',`/users/:id/${action}`,`${action} HR or Employee login`,['Admin'],z.object({}).strict(),r=>auth.manageUser(r.actor,r.params.id,action));
 add('post','/users/:id/employee-profile','Initialize HR employee profile',['Admin'],v.employee,r=>employee.linkHR(r.actor,r.params.id,r.validated.body));
 add('delete','/users/:id','Permanently remove HR or Employee user',['Admin'],null,r=>auth.deleteUser(r.actor,r.params.id));
-add('get','/employees/export','Export employees as safe CSV',['HR'],v.filters,async(r,res)=>{res.type('text/csv').attachment('employees.csv').send(await employee.exportCSV(r.actor,r.validated.query));},true);
-add('post','/employees/import','Validate or atomically import employee CSV',['HR'],z.object({csv:z.string().min(1).max(900000),dryRun:z.boolean().default(true)}).strict(),r=>employee.importCSV(r.actor,r.validated.body.csv,r.validated.body.dryRun));
-add('get','/employees','Paginated scoped directory',all,v.filters,r=>employee.listEmployees(r.actor,r.validated.query),true);
-add('post','/employees','Register employee with linked login',['HR'],v.employee,r=>employee.createEmployee(r.actor,r.validated.body));
-add('get','/employees/:id','Employee 360 (id or me)',all,null,r=>employee.employee360(r.actor,r.params.id));
-add('patch','/employees/:id','Edit employee; self may edit phone/address',['HR','Employee'],v.employeeEdit,r=>employee.editEmployee(r.actor,r.params.id,r.validated.body));
-add('put','/employees/:id/salary','Append prospective salary version',['HR'],z.object({effectiveDate:v.date,basicSalary:z.number().positive().max(1e10).multipleOf(0.01)}).strict(),r=>employee.setSalary(r.actor,r.params.id,r.validated.body));
-add('post','/attendance/check-in','Server-stamped web check-in',['Employee','HR'],z.object({}).strict(),r=>attendance.checkIn(r.actor));
-add('post','/attendance/check-out','Server-stamped web check-out',['Employee','HR'],z.object({}).strict(),r=>attendance.checkOut(r.actor));
+
+add('get','/users','List logins',['Admin'],v.filters,async r=>{const f=r.validated.query;const [users,total]=await Promise.all([User.find().sort({createdAt:-1}).skip((f.page-1)*f.limit).limit(f.limit),User.countDocuments()]);return {items:users.map(auth.publicUser),total,page:f.page,limit:f.limit};},true);
+for(const action of ['reset','deactivate','activate']) add('post',`/users/:id/${action}`,`${action} HR or Employee login`,['Admin'],z.object({}).strict(),r=>auth.manageUser(r.actor,r.params.id,action));
 add('get','/attendance','Own history or staff board/report',all,v.filters,r=>attendance.attendanceList(r.actor,r.validated.query),true);
 add('post','/attendance/reconcile','Idempotently close completed working dates',staff,z.object({from:v.date,to:v.date}).strict(),r=>attendance.reconcile(r.actor,r.validated.body.from,r.validated.body.to));
 add('post','/attendance/corrections','Request attendance correction',['Employee','HR'],v.correction,r=>attendance.requestCorrection(r.actor,r.validated.body));

@@ -1,7 +1,11 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { randomBytes, randomUUID } from 'node:crypto';
+
 import { Company, User, Session, Employee, Attendance, Correction, Leave, Notification } from '../models/index.js';
+
+import { Company, User, Session } from '../models/index.js';
+
 import { env } from '../config/env.js';
 import { assert } from '../utils/errors.js';
 import { transaction, audit, roles } from './common.js';
@@ -70,6 +74,7 @@ export async function changePassword(actor, input) {
     return { loginRequired:true };
   }, { business:false });
 }
+
 export async function createUser(actor, input) {
   roles(actor,'Admin');
   const allowedRoles = ['HR','Employee'];
@@ -77,10 +82,18 @@ export async function createUser(actor, input) {
   return transaction(async session => {
     const password = temporaryPassword();
     const [u] = await User.create([{ email:input.email, role:input.role, passwordHash:await bcrypt.hash(password,12) }], { session });
+
+export async function createHR(actor, input) {
+  roles(actor,'Admin');
+  return transaction(async session => {
+    const password = temporaryPassword();
+    const [u] = await User.create([{ email:input.email, role:'HR', passwordHash:await bcrypt.hash(password,12) }], { session });
+
     await audit(actor,'created','User',u._id,null,publicUser(u),session);
     return { user:publicUser(u), temporaryPassword:password };
   }, { business:false });
 }
+ 
 export async function createHR(actor, input) {
   return createUser(actor, { ...input, role: 'HR' });
 }
@@ -109,6 +122,7 @@ export async function deleteUser(actor, id) {
     return { deleted: true, user: before };
   }, { business: false });
 }
+
 export async function manageUser(actor,id,action) {
   roles(actor,'Admin');
   return transaction(async session => {
@@ -121,4 +135,4 @@ export async function manageUser(actor,id,action) {
     return { user:publicUser(u), ...(password && { temporaryPassword:password }) };
   }, { business:false });
 }
-
+},

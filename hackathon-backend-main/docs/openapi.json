@@ -49,6 +49,7 @@
         }
       }
     },
+<<<<<<< HEAD
     "/api/v1/setup/status": {
       "get": {
         "summary": "Whether initial setup is required",
@@ -88,6 +89,8 @@
         }
       }
     },
+=======
+>>>>>>> 43eb4ac6ba190478728f5494227597224a1ab458
     "/api/v1/setup": {
       "post": {
         "summary": "Create company and first Admin atomically",
@@ -1075,6 +1078,7 @@
       }
     },
     "/api/v1/users": {
+<<<<<<< HEAD
       "post": {
         "summary": "Create user login with temporary credentials",
         "description": "Allowed roles: Admin. See docs/API.md for business semantics and response data.",
@@ -1144,6 +1148,8 @@
           }
         }
       },
+=======
+>>>>>>> 43eb4ac6ba190478728f5494227597224a1ab458
       "get": {
         "summary": "List logins",
         "description": "Allowed roles: Admin. See docs/API.md for business semantics and response data.",
@@ -1651,6 +1657,7 @@
         }
       }
     },
+<<<<<<< HEAD
     "/api/v1/users/{id}": {
       "delete": {
         "summary": "Permanently remove HR or Employee user",
@@ -1703,6 +1710,8 @@
         }
       }
     },
+=======
+>>>>>>> 43eb4ac6ba190478728f5494227597224a1ab458
     "/api/v1/employees/export": {
       "get": {
         "summary": "Export employees as safe CSV",
