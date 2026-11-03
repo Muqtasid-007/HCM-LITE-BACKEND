@@ -1,0 +1,71 @@
+# HCM Lite rules and calculation contract
+
+## Records and scope
+
+One installation is one company. The database starts empty. Setup adds only the singleton policy and first Admin, plus an audit record. No demo business rows or metrics are seeded. All mutations affecting business data use a MongoDB transaction and a write to the singleton, serializing concurrent approvals, account linking, attendance and payroll. A failed transaction rolls back users, employee profiles, audit and notifications together. Important writes have actor/action/entity/before/after audit records; password hashes, tokens and temporary passwords never enter audit payloads. Audit and finalized payroll have no write/delete API.
+
+Admin views company records, manages settings and HR/logins, links HR profiles, finalizes payroll, posts announcements and views audit. HR registers/edits employees, manages salary history, reviews other people's requests, prepares payroll and views HR data. Employee accesses only their employee ID, with phone/address self edits. HR may self-service with a linked employee profile but may not approve their own leave/correction. Admin has no self-service employee profile. Neither client nor AI can set roles or ownership IDs on self-service writes. HR employee registration always creates role Employee; Admin cannot create another Admin through the API.
+
+Account `active` controls login, separately from employment status. Deactivate/reset an account to revoke its sessions; an employment status change does not automatically deactivate a login. JWT lasts eight hours, requires an unexpired server-side session, active user, matching token version and valid signature/issuer/audience. Logout deletes just its session; password changes/resets/deactivation revoke all sessions. Creator sees a generated temporary password once. Lost credentials require Admin reset, never plaintext retrieval. No refresh tokens or public password recovery.
+
+## Time and policy
+
+Dates use strict `YYYY-MM-DD`; month uses `YYYY-MM`; timestamp inputs require ISO 8601 with UTC offset. All automatic timestamps come from the server. Company timezone defaults to Asia/Karachi. Weekdays are ISO 1=Monday through 7=Sunday. Office shifts must start/end on the same local date; overnight shifts are outside this version.
+
+Setup's initial policy applies from `0001-01-01` to support truthful historical registration. Admin appends complete policy versions with increasing effective dates no earlier than tomorrow in the active company timezone. Historical date calculations select the latest version effective on that date. Attendance stores its applicable policy snapshot. Payroll stores policy and daily calculation snapshots. Settings changes do not rewrite old attendance or finalized runs. Leave types cannot be removed from a policy; deactivate them instead. Department/designation deletion returns 409 when referenced; inactive units remain readable but cannot be assigned to new profiles. Public holidays and annual quotas are edited through a full new company policy.
+
+Joining date is inclusive and fixed after registration. Exit date is inclusive (last employed day). Active and probation are eligible. Inactive periods are excluded from attendance/payroll. Exited status requires an exit date and allows the employee's final employed days through that date. HR appends employment status changes with future increasing effective dates; current calculations use history rather than applying future statuses early. Re-entry after exit requires a new employment record; the API does not clear prior exit dates. Name/contact/job unit edits are immediate metadata edits. Finalized slips keep employee/company names and organizational IDs from generation.
+
+Salaries are positive PKR amounts with at most two decimals on input; saved as integer paisa. Registration establishes the first salary from joining date. Changes require increasing future effective dates. Past salaries cannot be overwritten. No arbitrary allowances are accepted: HRA and medical follow challenge percentages.
+
+## Attendance
+
+Unique database index: employee ID + company-local date. Check-in and checkout ignore client timestamps/ownership (unexpected fields return 422). Duplicate check-in or checkout and checkout without today's open check-in return 409. Check-in requires an employed working day without approved leave. A missed prior-day checkout uses a correction; it is not silently attached to today's session.
+
+Status precedence: an actual session is `open` until checkout, then `half_day` if duration is below threshold, otherwise `late` if past grace, otherwise `present`. `late` is also retained independently as a boolean, including on half days and missing checkouts. Exactly 09:15 is on time under the default policy; any later instant is late. Exactly five hours is a full day. Duration is whole elapsed minutes rounded down; open sessions are never completed half days.
+
+Day close operates only on dates strictly before local today. An unclosed session becomes `missing_checkout`, retaining its late flag. No session plus approved leave becomes `on_leave`; otherwise an eligible working day becomes `absent`. Weekends, public holidays, dates before joining, after exit, during inactive periods, and today/future are excluded. Repeated day close does not add duplicates and re-evaluates derived states. Prior attendance policy snapshots remain unchanged. Payroll and analytics use the same date eligibility. An open historical session counts as missing checkout in analytics even before the job runs.
+
+Corrections contain a reason and proposed check-in/out on the requested local date, ordered and no later than server now. Pending corrections are unique per employee/date. HR reviews with a mandatory comment; approval retains original values in correction/audit history and recomputes under the original attendance policy snapshot. Approved leave and actual attendance cannot occupy the same day. Correcting historical attendance after finalization changes operational records but never the saved payroll; adjustments are a separate future process outside this lite implementation.
+
+## Leave
+
+Dates are inclusive; skip weekends/public holidays per date-effective policy. Applications must start today or later, contain a working day and stay within eligible employment. Annual 14, sick 8, casual 10; unpaid unlimited by default. No overlapping pending or approved intervals for an employee (even if the overlap is on a weekend). Actual attendance blocks a leave day.
+
+Pending requests **do not reserve** quota. Applications check current approved use and approval checks again transactionally. A race can cause one otherwise valid pending request's approval to fail with 422. Year-crossing requests store each working date and year separately, with paid/quota snapshots; annual limits reset by calendar year, are not prorated for joining, and have no carryover. For a request spanning a quota change within a year, the lowest applicable requested-day quota governs that approval. Balance responses use the policy effective at year end (including scheduled policy versions) and approved use only; they are an annual overview, while approval uses each requested date's rules. Quota reductions can show zero remaining when previously approved use exceeds the new quota; previous approvals stay valid.
+
+Cancellation is self-service only for pending/approved requests whose start is strictly after today. Started requests, rejected/cancelled requests cannot be cancelled. Approved future cancellation immediately restores balances because approved use is derived from request state. There are no future derived attendance rows to restore; historical requests cannot be cancelled. Finalized payroll snapshots never change. Approval/rejection creates an own notification and audit record. Cancellation does not delete request history.
+
+## Payroll
+
+One unique run per month; repeat HR generation recalculates the same draft. Draft generation closes historical eligible dates; future dates in an ongoing-month draft are **projections treated as payable**, not recorded absences. Admin may finalize only after the month has ended in the applicable company timezone. Regenerate immediately before finalizing: a monotonically increasing business revision rejects stale drafts after any intervening business mutation (including announcements/reconciliation). Authentication actions do not stale a draft. No endpoint mutates or recalculates a finalized run or slip. Reconciliation after finalization never changes its saved calculations.
+
+For each month working date, select its policy and salary effective that date. The denominator is all policy working days in the month. Only employed days contribute pay. For a day with monthly basic B: HRA=round(B×0.4), medical=round(B×0.1), monthly gross=B+HRA+medical. Add basic/HRA/medical divided by the month working-day denominator for each eligible date; round each accumulated component to nearest paisa, half up (`Math.round`, all amounts nonnegative). This prorates joining, exit, inactive periods and salary changes. `grossMinor` is the sum of the rounded components. Full monthly salary of an eligible employee has gross 1.5×basic, subject to paisa rounding on allowances.
+
+Per-day rate = applicable monthly gross / month working days. Deduction precedence: approved unpaid leave = 1, approved paid leave = 0, absent = 1, half day = 0.5, otherwise 0. A late flag never adds another deduction. Missing checkout is not an absence and has no deduction under challenge rules. Add unrounded daily deductions and round the month total once. Avoids double deduction of leave/absence/half-day. Snapshots expose each date's rate (rounded for display), factor, reason, policy version and salary. Months with zero working days produce no slips and zero aggregate cost; no division occurs.
+
+Challenge tax is calculated on each date's full monthly gross ×12 in PKR, then monthly tax is apportioned by eligible dates / full month working days and rounded once. Tax does not fall when absences or unpaid leave lower payable salary. For partial months and salary changes this apportions the full-salary challenge tax by eligible date rather than annualizing the reduced paid amount. Monthly tax table:
+
+| Annual gross PKR | Annual tax PKR |
+|---|---|
+| ≤600,000 | 0 |
+| ≤1,200,000 | 5% of excess over 600,000 |
+| ≤2,400,000 | 30,000 + 15% of excess over 1,200,000 |
+| ≤3,600,000 | 210,000 + 25% of excess over 2,400,000 |
+| >3,600,000 | 510,000 + 35% of excess over 3,600,000 |
+
+Net = max(0,gross − attendance/unpaid deductions − challenge tax). Integer money fields end in `Minor`; divide by 100 only for UI/PDF display. These are illustrative hackathon calculations, not current statutory tax law.
+
+## Dashboards
+
+All metrics are computed from scoped database records. Attendance uses a database query plus date-policy eligibility reconciliation in the analytics service; headcount, departmental salary totals, leave-summary totals and top late-comers use MongoDB aggregations. Default dashboard range is company-local month start through today; maximum range three years. Leave summary defaults to today for questions such as who is on leave. Department filters scope employees first. Employee queries always force own employee ID, even if another ID or department filter is provided. New accounts without linked profiles have zero employee data.
+
+Headcount = active/probation employed at range end. Attrition = exits within range / mean(headcount at start, headcount at end) ×100, zero for empty denominator. Today without check-in/leave is excluded from absence and attendance-rate denominator until day close. Attendance rate = (present + late + missing checkout + open today + 0.5×half day) / (eligible evaluated days − on-leave) ×100. Late percentage uses the exclusive late status / (present + late), while lateFlags and late-comers include late half-days/missing checkouts. Absenteeism = absent / evaluated eligible working days ×100. Trend, by-department, gender/tenure, payroll and leave totals derive from the same scope. Approved leave is not absent.
+
+Payroll aggregates include finalized runs whose month overlaps the filter range; partial-month filters include that whole saved run. Average gross uses each current employed employee's applicable salary. Leave utilization uses approved working days within range / sum of paid active annual quotas for end-date headcount (no annualization for partial-year ranges). Custom quota changes and multiple-year filters should be interpreted with that denominator. Employee dashboard includes scoped records, leave balances, last published payslip and hours in range. Request the current week's date range to compare `hoursWorked` against the 40-hour target. No statistical risk scores or invented insights are generated.
+
+## AI and deployment limits
+
+Every AI tool receives the authenticated actor from the backend, never a model-supplied identity. Seven read tools only, no database query interpreter and no mutation tools. Restricted tools explicitly refuse Employee company headcount, directory, late-comers or payroll summaries. Allowed attendance/leave tools remain own-scoped. Provider output is an assistant explanation, not trusted application state. Smart leave JSON is validated and retried once, then falls back to the normal form. Normal leave submission revalidates everything after confirmation. Summaries receive server-derived dashboard facts, not client KPI JSON. AI log metadata records actor, kind, outcome, tool names and duration; it deliberately excludes prompts/results containing personal information.
+
+Provider timeout is 15 seconds per AI request, shared across its tool rounds; up to four rounds and eight tool calls per round. Rate limits: general 300 requests/IP/minute, failed login+setup 10/IP/15min (successful requests are removed from this bucket), all AI features combined 20/user/hour. Stores are process local. No background cron is silently installed; configure the documented reconciliation job in your host. Global company serialization favors correctness over large-company throughput. This backend omits the optional camera/biometric and risk/anomaly bonus features.

@@ -1,0 +1,25 @@
+import mongoose from 'mongoose';
+const { Schema } = mongoose;
+const opts = { timestamps: true, versionKey: false };
+const objectId = { type: Schema.Types.ObjectId };
+const policy = new Schema({ effectiveDate: String, timezone: String, officeStart: String, officeEnd: String, graceMinutes: Number, halfDayHours: Number, weekendDays: [Number], officeLatitude: Number, officeLongitude: Number, geofenceRadius: Number, leaveTypes: [{ _id: false, name: String, quota: Number, paid: Boolean, active: Boolean }], holidays: [{ _id: false, date: String, name: String, active: Boolean }] }, { _id: false });
+export const Company = mongoose.model('Company', new Schema({ _id: { type: String, default: 'singleton' }, name: String, policies: [policy], lock: { type: Number, default: 0 }, revision: { type: Number, default: 0 } }, opts));
+export const User = mongoose.model('User', new Schema({ email: { type: String, unique: true, required: true, trim: true, lowercase: true }, passwordHash: { type: String, select: false }, role: { type: String, enum: ['Admin','HR','Employee'] }, active: { type: Boolean, default: true }, mustChangePassword: { type: Boolean, default: true }, tokenVersion: { type: Number, default: 0 }, employeeId: objectId }, opts));
+export const Session = mongoose.model('Session', new Schema({ _id: String, userId: objectId, expiresAt: { type: Date, index: { expires: 0 } } }, opts));
+const configSchema = new Schema({ kind: { type: String, enum: ['department','designation'] }, name: String, active: { type: Boolean, default: true } }, opts);
+configSchema.index({ kind: 1, name: 1 }, { unique: true });
+export const OrgUnit = mongoose.model('OrgUnit', configSchema);
+export const Employee = mongoose.model('Employee', new Schema({ userId: { ...objectId, unique: true }, code: { type: String, unique: true }, email: { type: String, unique: true }, name: String, departmentId: objectId, designationId: objectId, joiningDate: String, exitDate: String, status: String, gender: { type: String, enum: ['female', 'male', 'other'], required: true }, phone: String, address: String, emergencyContact: String, employmentHistory: [{ _id: false, effectiveDate: String, status: String }], salaryHistory: [{ _id: false, effectiveDate: String, basicMinor: Number }] }, opts));
+const attendanceSchema = new Schema({ employeeId: objectId, date: String, checkIn: Date, checkOut: Date, minutes: { type: Number, default: 0 }, late: { type: Boolean, default: false }, status: String, source: { type: String, default: 'web' }, policySnapshot: policy, correctionHistory: [Schema.Types.Mixed] }, opts);
+attendanceSchema.index({ employeeId: 1, date: 1 }, { unique: true });
+export const Attendance = mongoose.model('Attendance', attendanceSchema);
+const correctionSchema = new Schema({ employeeId: objectId, date: String, checkIn: Date, checkOut: Date, reason: String, state: { type: String, default: 'pending' }, comment: String, reviewedBy: objectId }, opts);
+correctionSchema.index({ employeeId: 1, date: 1 }, { unique: true, partialFilterExpression: { state: 'pending' } });
+export const Correction = mongoose.model('Correction', correctionSchema);
+export const Leave = mongoose.model('Leave', new Schema({ employeeId: objectId, type: String, start: String, end: String, reason: String, days: [{ _id: false, date: String, year: Number, paid: Boolean, quota: Number }], state: { type: String, default: 'pending' }, comment: String, reviewedBy: objectId }, opts));
+export const Payroll = mongoose.model('Payroll', new Schema({ month: { type: String, unique: true }, state: { type: String, default: 'draft' }, sourceRevision: Number, slips: [Schema.Types.Mixed], policySnapshots: [policy], generatedAt: Date, finalizedAt: Date, finalizedBy: objectId }, opts));
+export const Announcement = mongoose.model('Announcement', new Schema({ title: String, body: String, authorId: objectId }, opts));
+export const Notification = mongoose.model('Notification', new Schema({ userId: objectId, title: String, entityId: String, readAt: Date }, opts));
+export const Audit = mongoose.model('Audit', new Schema({ actorId: objectId, action: String, entity: String, entityId: String, before: Schema.Types.Mixed, after: Schema.Types.Mixed }, opts));
+export const AiLog = mongoose.model('AiLog', new Schema({ userId: objectId, kind: String, outcome: String, tools: [String], durationMs: Number }, { ...opts, collection:'ai_logs' }));
+export async function ensureIndexes() { await Promise.all(Object.values(mongoose.models).map(m => m.init())); }
