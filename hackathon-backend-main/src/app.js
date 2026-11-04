@@ -120,31 +120,45 @@ app.use(express.json({ limit: '1mb' }));
 
 // ---------------------------------------------------------------------------
 // NoSQL injection sanitization — strip keys starting with $ or containing .
-// Applied to body, query, and params after parsing.
+// Operates on keys only, so password *values* are never affected.
+// This runs on ALL routes including auth — it's the primary defence against
+// MongoDB operator injection attacks like { "$gt": "" } login bypasses.
 // ---------------------------------------------------------------------------
-function sanitizeObject(obj) {
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return obj;
+function sanitizeObject(obj, depth = 0) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj) || depth > 10) return obj;
   for (const key of Object.keys(obj)) {
     if (key.startsWith('$') || key.includes('.')) {
       delete obj[key];
     } else {
-      sanitizeObject(obj[key]);
+      sanitizeObject(obj[key], depth + 1);
     }
   }
   return obj;
 }
 
 app.use((req, _res, next) => {
-  sanitizeObject(req.body);
-  sanitizeObject(req.query);
-  // req.params is set per-route; sanitize what we can at the app level
-  sanitizeObject(req.params);
+  try {
+    sanitizeObject(req.body);
+    sanitizeObject(req.query);
+    // req.params is populated per-route; sanitize defensively at app level too
+    sanitizeObject(req.params);
+  } catch (err) {
+    // Sanitization must never crash a request — log and continue
+    logger.warn({ requestId: req.id, err: err.message }, 'sanitizeObject failed');
+  }
   next();
 });
 
 // ---------------------------------------------------------------------------
-// XSS sanitization — strip <script> tags and javascript: URIs from strings
-// Only sanitizes string leaf values; structured data is validated by Zod.
+// XSS sanitization — strip <script> blocks and javascript: URIs from strings.
+//
+// PASSWORD FIELDS ARE INTENTIONALLY EXCLUDED.
+// Passwords are hashed immediately on receipt and never rendered as HTML, so
+// stripping characters from them would silently corrupt credentials without
+// any security benefit. The NoSQL pass above already covers injection for
+// auth routes; Zod schema validation catches everything else.
+//
+// Excluded fields: password, currentPassword, newPassword
 // ---------------------------------------------------------------------------
 const XSS_PATTERNS = [
   /<script[\s\S]*?>[\s\S]*?<\/script>/gi,
@@ -152,23 +166,35 @@ const XSS_PATTERNS = [
   /javascript\s*:/gi,
 ];
 
-function sanitizeStrings(obj) {
-  if (obj === null || obj === undefined) return obj;
+const PASSWORD_FIELDS = new Set(['password', 'currentPassword', 'newPassword']);
+
+function sanitizeStrings(obj, depth = 0) {
+  if (obj === null || obj === undefined || depth > 10) return obj;
   if (typeof obj === 'string') {
     let value = obj;
     for (const pattern of XSS_PATTERNS) value = value.replace(pattern, '');
     return value;
   }
-  if (Array.isArray(obj)) return obj.map(sanitizeStrings);
+  if (Array.isArray(obj)) return obj.map(item => sanitizeStrings(item, depth + 1));
   if (typeof obj === 'object') {
-    for (const key of Object.keys(obj)) obj[key] = sanitizeStrings(obj[key]);
+    for (const key of Object.keys(obj)) {
+      // Skip password fields — preserve them exactly as the user typed
+      if (!PASSWORD_FIELDS.has(key)) {
+        obj[key] = sanitizeStrings(obj[key], depth + 1);
+      }
+    }
   }
   return obj;
 }
 
 app.use((req, _res, next) => {
-  req.body  = sanitizeStrings(req.body);
-  req.query = sanitizeStrings(req.query);
+  try {
+    req.body  = sanitizeStrings(req.body);
+    req.query = sanitizeStrings(req.query);
+  } catch (err) {
+    // Sanitization must never crash a request — log and continue
+    logger.warn({ requestId: req.id, err: err.message }, 'sanitizeStrings failed');
+  }
   next();
 });
 
