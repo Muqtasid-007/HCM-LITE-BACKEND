@@ -12,7 +12,7 @@ import * as employee from '../services/employees.js';
 import * as attendance from '../services/attendance.js';
 import * as leave from '../services/leave.js';
 import * as payroll from '../services/payroll.js';
-import { dashboard } from '../services/analytics.js';
+import { dashboard, attendanceSummary } from '../services/analytics.js';
 import { aiRequest, runTool } from '../services/ai.js';
 import { transaction, audit, company } from '../services/common.js';
 import { currentPolicy, dates } from '../utils/dates.js';
@@ -78,6 +78,7 @@ add('get','/payslips','List authorized payslips',all,null,r=>payroll.payslips(r.
 add('get','/payslips/:runId/:employeeId/pdf','Download authorized payslip PDF',all,null,async(r,res)=>{const slip=await payroll.getPayslip(r.actor,r.params.runId,r.params.employeeId);res.type('application/pdf').attachment(`payslip-${slip.month}.pdf`).send(await payroll.renderPayslip(slip));});
 add('get','/payslips/:runId/:employeeId','Read saved payslip breakdown',all,null,r=>payroll.getPayslip(r.actor,r.params.runId,r.params.employeeId));
 add('get','/dashboard','Role-scoped dashboard and analytics',all,v.filters,r=>dashboard(r.actor,r.validated.query),true);
+add('get','/analytics/attendance-summary','Attendance status distribution and trend',['Admin','HR'],v.attendanceSummary,r=>attendanceSummary(r.actor,r.validated.query.range),true);
 for(const tool of ['get_headcount','get_attendance_summary','get_late_comers','get_leave_summary','get_my_leave_balance','get_payroll_summary','search_employees']) add('get',`/analytics/${tool}`,`Read ${tool}`,all,v.filters,r=>runTool(r.actor,tool,Object.fromEntries(Object.entries(r.validated.query).filter(([k])=>['from','to','departmentId','search','year'].includes(k)))),true);
 add('get','/announcements','Read announcements',all,v.filters,async r=>{const f=r.validated.query;return {items:await Announcement.find().sort({createdAt:-1}).skip((f.page-1)*f.limit).limit(f.limit),total:await Announcement.countDocuments(),page:f.page,limit:f.limit};},true);
 add('post','/announcements','Post company announcement',staff,z.object({title:v.text,body:v.text}).strict(),r=>transaction(async s=>{const [a]=await Announcement.create([{...r.validated.body,authorId:r.actor._id}],{session:s});await audit(r.actor,'posted','Announcement',a._id,null,a.toObject(),s);return a;}));

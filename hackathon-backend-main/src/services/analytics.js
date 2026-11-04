@@ -73,3 +73,45 @@ export async function dashboard(actor,f={}) {
   if(actor.role==='Employee') { const {leaveBalance}=await import('./leave.js');result.leaveBalance=actor.employeeId?await leaveBalance(actor,'me',Number(to.slice(0,4))):null;result.hoursWorked=counts.minutes/60;result.weeklyTargetHours=40; const latest=await Payroll.findOne({state:'finalized','slips.employeeId':String(actor.employeeId)}).sort({month:-1}).lean(); result.lastPayslip=latest?{runId:latest._id,month:latest.month,...latest.slips.find(s=>s.employeeId===String(actor.employeeId))}:null; }
   return result;
 }
+
+export async function attendanceSummary(actor,range='week') {
+  assert(['Admin','HR'].includes(actor.role),403,'Staff access required');
+  const c=await company(),policy=currentPolicy(c),zone=policy.timezone,now=DateTime.now().setZone(zone),to=now.toISODate();
+  const from=range==='day'?to:range==='week'?now.minus({days:6}).toISODate():now.startOf('month').toISODate();
+  const datesInRange=dates(from,to),employees=await Employee.find({joiningDate:{$lte:to},$or:[{exitDate:null},{exitDate:{$gte:from}}]}).lean();
+  const ids=employees.map(e=>e._id);
+  const [records,approvedLeaves]=await Promise.all([
+    Attendance.find({employeeId:{$in:ids},date:{$gte:from,$lte:to}}).lean(),
+    Leave.find({employeeId:{$in:ids},state:'approved',start:{$lte:to},end:{$gte:from}}).select('employeeId days').lean(),
+  ]);
+  const attendanceByDay=new Map(records.map(row=>[`${row.employeeId}:${row.date}`,row]));
+  const leaveDays=new Set();
+  for(const request of approvedLeaves) for(const day of request.days) if(day.date>=from&&day.date<=to) leaveDays.add(`${request.employeeId}:${day.date}`);
+  const totals={present:0,late:0,absent:0,on_leave:0};
+  const daily=new Map(datesInRange.map(date=>[date,{date,label:date,present:0,late:0,absent:0,on_leave:0}]));
+  for(const date of datesInRange) {
+    const dayPolicy=policyFor(c,date);
+    if(!working(date,dayPolicy)) continue;
+    for(const employee of employees) {
+      if(!employed(employee,date)) continue;
+      const key=`${employee._id}:${date}`,record=attendanceByDay.get(key);
+      const status=leaveDays.has(key)&&!record?.checkIn?'on_leave':record?.checkIn?(record.late?'late':'present'):'absent';
+      daily.get(date)[status]++;
+      totals[status]++;
+    }
+  }
+  let trend;
+  if(range==='day') {
+    const hourly=Array.from({length:24},(_,hour)=>({date:to,label:`${String(hour).padStart(2,'0')}:00`,present:0,late:0}));
+    for(const record of records) if(record.checkIn) {
+      const hour=DateTime.fromJSDate(new Date(record.checkIn),{zone}).hour;
+      hourly[hour][record.late?'late':'present']++;
+    }
+    trend=hourly;
+  } else if(range==='month') {
+    trend=datesInRange.map(date=>daily.get(date));
+  } else {
+    trend=datesInRange.map(date=>daily.get(date));
+  }
+  return {range,from,to,totals,trend,trendUnit:range==='day'?'check-ins':'employees'};
+}
