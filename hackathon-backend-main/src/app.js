@@ -139,7 +139,10 @@ function sanitizeObject(obj, depth = 0) {
 app.use((req, _res, next) => {
   try {
     sanitizeObject(req.body);
-    sanitizeObject(req.query);
+    const query = sanitizeObject(req.query);
+    // Express 5 reparses req.query on each getter access; retain this sanitized
+    // object downstream without assigning through the getter-only property.
+    Object.defineProperty(req, 'query', { configurable: true, enumerable: true, writable: true, value: query });
     // req.params is populated per-route; sanitize defensively at app level too
     sanitizeObject(req.params);
   } catch (err) {
@@ -168,29 +171,28 @@ const XSS_PATTERNS = [
 
 const PASSWORD_FIELDS = new Set(['password', 'currentPassword', 'newPassword']);
 
-function sanitizeStrings(obj, depth = 0) {
-  if (obj === null || obj === undefined || depth > 10) return obj;
-  if (typeof obj === 'string') {
-    let value = obj;
-    for (const pattern of XSS_PATTERNS) value = value.replace(pattern, '');
-    return value;
-  }
-  if (Array.isArray(obj)) return obj.map(item => sanitizeStrings(item, depth + 1));
-  if (typeof obj === 'object') {
-    for (const key of Object.keys(obj)) {
-      // Skip password fields — preserve them exactly as the user typed
-      if (!PASSWORD_FIELDS.has(key)) {
-        obj[key] = sanitizeStrings(obj[key], depth + 1);
-      }
+function sanitizeStringsInPlace(value, depth = 0) {
+  if (value === null || value === undefined || depth > 10 || typeof value !== 'object') return value;
+  for (const key of Object.keys(value)) {
+    // Skip password fields — preserve them exactly as the user typed
+    if (PASSWORD_FIELDS.has(key)) continue;
+
+    const current = value[key];
+    if (typeof current === 'string') {
+      let sanitized = current;
+      for (const pattern of XSS_PATTERNS) sanitized = sanitized.replace(pattern, '');
+      value[key] = sanitized;
+    } else if (current && typeof current === 'object') {
+      sanitizeStringsInPlace(current, depth + 1);
     }
   }
-  return obj;
+  return value;
 }
 
 app.use((req, _res, next) => {
   try {
-    req.body  = sanitizeStrings(req.body);
-    req.query = sanitizeStrings(req.query);
+    sanitizeStringsInPlace(req.body);
+    sanitizeStringsInPlace(req.query);
   } catch (err) {
     // Sanitization must never crash a request — log and continue
     logger.warn({ requestId: req.id, err: err.message }, 'sanitizeStrings failed');
