@@ -17,4 +17,7 @@ export const leave = z.object({ type:z.string().min(1).max(32), start:date, end:
 export const decision = z.object({ decision:z.enum(['approved','rejected']), comment:text }).strict();
 export const correction = z.object({ date, checkIn:z.iso.datetime({ offset:true }), checkOut:z.iso.datetime({ offset:true }), reason:text }).strict().refine(v => DateTime.fromISO(v.checkOut) > DateTime.fromISO(v.checkIn), 'Checkout must follow checkin');
 export const filters = z.object({ page:z.coerce.number().int().min(1).default(1), limit:z.coerce.number().int().min(1).max(100).default(20), search:z.string().max(100).optional(), departmentId:id.optional(), designationId:id.optional(), status:z.enum(['active','probation','inactive','exited']).optional(), sort:z.enum(['name','code','joiningDate','-name','-joiningDate']).default('name'), from:date.optional(), to:date.optional(), employeeId:id.optional(), state:z.enum(['pending','approved','rejected','cancelled']).optional(), year:z.coerce.number().int().min(2000).max(2200).optional() }).strict();
-export const attendanceSummary = z.object({ range:z.enum(['day','week','month']).default('week') }).strict();
+export const attendanceSummary = z.object({
+  period:z.enum(['day','week','month']).optional(),
+  range:z.enum(['day','week','month']).optional(),
+}).strict().transform(q=>({period:q.period||q.range||'week'}));
