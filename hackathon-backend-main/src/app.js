@@ -46,29 +46,53 @@ app.use((req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
-// Security headers — tightened Helmet CSP
+// Security headers
+// Helmet is applied globally with a strict default CSP suited to a JSON API.
+// The /api/docs route overrides the CSP header after Helmet runs, relaxing
+// only the directives Swagger UI requires (CDN scripts/styles + data: images).
+// Every other route keeps the locked-down defaults.
 // ---------------------------------------------------------------------------
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
-      defaultSrc: ["'none'"],
-      scriptSrc:  ["'none'"],
-      styleSrc:   ["'none'"],
-      imgSrc:     ["'none'"],
-      connectSrc: ["'self'"],
-      frameSrc:   ["'none'"],
-      objectSrc:  ["'none'"],
-      baseUri:    ["'none'"],
-      formAction: ["'none'"],
+      defaultSrc:  ["'none'"],
+      scriptSrc:   ["'none'"],
+      styleSrc:    ["'none'"],
+      imgSrc:      ["'none'"],
+      connectSrc:  ["'self'"],
+      frameSrc:    ["'none'"],
+      objectSrc:   ["'none'"],
+      baseUri:     ["'none'"],
+      formAction:  ["'none'"],
     },
   },
   hsts: {
-    maxAge: 31536000,          // 1 year
+    maxAge: 31536000,   // 1 year
     includeSubDomains: true,
     preload: true,
   },
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
+
+// Docs-route CSP — applied after Helmet so it overwrites only for /api/docs*.
+// Allows the unpkg CDN bundle Swagger UI needs and nothing else.
+const SWAGGER_CDN = 'https://unpkg.com';
+const DOCS_CSP = [
+  `default-src 'none'`,
+  `script-src  'self' ${SWAGGER_CDN} 'unsafe-inline'`,   // swagger-ui-bundle.js needs unsafe-inline for its worker
+  `style-src   'self' ${SWAGGER_CDN} 'unsafe-inline'`,   // swagger-ui.css uses inline style overrides
+  `img-src     'self' ${SWAGGER_CDN} data:`,              // data: URIs used for embedded icons
+  `connect-src 'self'`,                                   // API calls from the Try-It-Out panel
+  `frame-src   'none'`,
+  `object-src  'none'`,
+  `base-uri    'none'`,
+  `form-action 'none'`,
+].join('; ');
+
+app.use('/api/docs', (_req, res, next) => {
+  res.setHeader('Content-Security-Policy', DOCS_CSP);
+  next();
+});
 
 // ---------------------------------------------------------------------------
 // CORS — explicit allowlist only; wildcard *.vercel.app removed
@@ -176,6 +200,39 @@ app.get('/ready', async (req, res) => {
 
 // OpenAPI spec (non-sensitive, public)
 app.get('/api/v1/openapi.json', (req, res) => res.json(openapi()));
+
+// ---------------------------------------------------------------------------
+// Swagger UI — served from CDN bundle, no additional npm dependency.
+// The DOCS_CSP middleware above already set the relaxed header for this path.
+// Available at: /api/docs
+// ---------------------------------------------------------------------------
+app.get('/api/docs', (_req, res) => {
+  const swaggerUiVersion = '5.18.2'; // pinned CDN version
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HCM Lite – API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@${swaggerUiVersion}/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@${swaggerUiVersion}/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: '/api/v1/openapi.json',
+      dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      layout: 'BaseLayout',
+      deepLinking: true,
+      persistAuthorization: true,
+    });
+  </script>
+</body>
+</html>`);
+});
 
 // ---------------------------------------------------------------------------
 // API router
